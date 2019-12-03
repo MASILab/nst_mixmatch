@@ -136,10 +136,10 @@ class DataSet:
 
         self.label_to_images = {}
         for i in range (len(np_data['image'])):
-            if np_data['label'][i] in self.label_to_images:
-                self.label_to_images[np_data['label'][i]].append(np_data['image'][i])
+            if np_data['label'][i][0] in self.label_to_images:
+                self.label_to_images[np_data['label'][i][0]].append(np_data['image'][i])
             else:
-                self.label_to_images[np_data['label'][i]] = [np_data['image'][i]]
+                self.label_to_images[np_data['label'][i][0]] = [np_data['image'][i]]
 
         self.eval_labeled = eval_labeled
         self.eval_unlabeled = eval_unlabeled
@@ -155,11 +155,24 @@ class DataSet:
         self.p_unlabeled = p_unlabeled
 
     def match(self, y):
-        equiv_y = {'image':np.zeros(y['image'].shape), 'label': y['label'].copy()}
-        for i in range(len(y['image'])):
-            idx = randint(0, len(self.label_to_images[y['label'][i]])-1)
-            equiv_y['image'][i] = self.label_to_images[y['label'][i]][idx]
-        return equiv_y
+        e = {'image':np.zeros(y['image'].shape), 'label': y['label'].copy()}
+        if len(e['image'].shape) == 4:
+            for i in range(len(y['image'])):
+                idx = randint(0, len(self.label_to_images[y['label'][i]])-1)
+                e['image'][i] = self.label_to_images[y['label'][i]][idx]
+            return e
+        elif len(e['image'].shape) == 5:
+            # for i in range(y['image'].shape[0]):
+            #     idx = randint(0, len(self.label_to_images[y['label'][i][0]])-1)
+            #     e['image'][i,0] = y['image'][i,0]
+            #     e['image'][i,1] = self.label_to_images[y['label'][i][0]][idx]
+
+            # e = {'image': np.zeros(y['image'][:,0,:,:,:].shape), 'label': y['label'].copy()}
+            for i in range(y['image'].shape[0]):
+                idx = randint(0, len(self.label_to_images[y['label'][i][0]]) - 1)
+                e['image'][i] = self.label_to_images[y['label'][i][0]][idx]
+
+            return e
 
 
     @classmethod

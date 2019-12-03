@@ -22,13 +22,13 @@ import os
 from absl import app
 from absl import flags
 from easydict import EasyDict
-from libml import utils, data, models
+from libml import utils, data, models_nst
 import tensorflow as tf
 
 FLAGS = flags.FLAGS
 
 
-class NST(models.MultiModel):
+class NST(models_nst.MultiModel):
 
     def model(self, lr, wd, ema, warmup_pos, consistency_weight, **kwargs):
         hwc = [self.dataset.height, self.dataset.width, self.dataset.colors]
@@ -46,7 +46,7 @@ class NST(models.MultiModel):
         logits_y = classifier(y_in, training=True)
         logits_e = classifier(e_in, training=True)
 
-        loss_nst = tf.losses.mean_squared_error(logits_e, logits_y)
+        loss_nst = tf.losses.mean_squared_error(tf.nn.softmax(logits_e), tf.nn.softmax(logits_y))
 
         loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=l, logits=logits_x)
         loss = tf.reduce_mean(loss)
@@ -101,8 +101,8 @@ def main(argv):
 if __name__ == '__main__':
     utils.setup_tf()
     flags.DEFINE_float('wd', 0.02, 'Weight decay.')
-    flags.DEFINE_float('consistency_weight', 1., 'Consistency weight.')
-    flags.DEFINE_float('warmup_pos', 0.4, 'Relative position at which constraint loss warmup ends.')
+    flags.DEFINE_float('consistency_weight', 50., 'Consistency weight.')
+    flags.DEFINE_float('warmup_pos', 0.5, 'Relative position at which constraint loss warmup ends.')
     flags.DEFINE_float('ema', 0.999, 'Exponential moving average of params.')
     flags.DEFINE_float('smoothing', 0.1, 'Label smoothing.')
     flags.DEFINE_integer('scales', 0, 'Number of 2x2 downscalings in the classifier.')

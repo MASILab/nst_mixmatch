@@ -24,7 +24,7 @@ import os
 from absl import app
 from absl import flags
 from easydict import EasyDict
-from libml import layers, utils, models
+from libml import layers, utils, models_nst
 from libml.data_pair import DATASETS
 from libml.layers import MixMode
 import tensorflow as tf
@@ -32,7 +32,7 @@ import tensorflow as tf
 FLAGS = flags.FLAGS
 
 
-class MixMatch(models.MultiModel):
+class MixMatch(models_nst.MultiModel):
 
     def augment(self, x, l, beta, **kwargs):
         assert 0, 'Do not call.'
@@ -49,13 +49,15 @@ class MixMatch(models.MultiModel):
         p_target /= tf.reduce_sum(p_target, axis=1, keep_dims=True)
         return EasyDict(p_target=p_target, p_model=p_model_y)
 
-    def model(self, batch, lr, wd, ema, beta, w_match, warmup_kimg=1024, nu=2, mixmode='xxy.yxy', **kwargs):
+    def model(self, batch, lr, wd, ema, beta, w_match, nst_alpha, warmup_kimg=1024, nu=2, mixmode='xxy.yxy', **kwargs):
         hwc = [self.dataset.height, self.dataset.width, self.dataset.colors]
         x_in = tf.placeholder(tf.float32, [None] + hwc, 'x')
         y_in = tf.placeholder(tf.float32, [None, nu] + hwc, 'y')
+        e_in = tf.placeholder(tf.float32, [None, nu] + hwc, 'e')
         l_in = tf.placeholder(tf.int32, [None], 'labels')
         wd *= lr
         w_match *= tf.clip_by_value(tf.cast(self.step, tf.float32) / (warmup_kimg << 10), 0, 1)
+        nst_alpha *= tf.clip_by_value(tf.cast(self.step, tf.float32) / (warmup_kimg << 10), 0, 1)
         augment = MixMode(mixmode)
         classifier = functools.partial(self.classifier, **kwargs)
 
@@ -85,13 +87,19 @@ class MixMatch(models.MultiModel):
         tf.summary.scalar('losses/xe', loss_xe)
         tf.summary.scalar('losses/l2u', loss_l2u)
 
+        e = tf.reshape(tf.transpose(e_in, [1, 0, 2, 3, 4]), [-1] + hwc)
+        guess_e = self.guess_label(tf.split(e, nu), classifier, T=0.5, **kwargs)
+
+        loss_nst = tf.square(guess.p_target - guess_e.p_target)
+        loss_nst = tf.reduce_mean(loss_nst)
+
         ema = tf.train.ExponentialMovingAverage(decay=ema)
         ema_op = ema.apply(utils.model_vars())
         ema_getter = functools.partial(utils.getter_ema, ema)
         post_ops.append(ema_op)
         post_ops.extend([tf.assign(v, v * (1 - wd)) for v in utils.model_vars('classify') if 'kernel' in v.name])
 
-        train_op = tf.train.AdamOptimizer(lr).minimize(loss_xe + w_match * loss_l2u, colocate_gradients_with_ops=True)
+        train_op = tf.train.AdamOptimizer(lr).minimize(loss_xe + w_match * loss_l2u + nst_alpha * loss_nst, colocate_gradients_with_ops=True)
         with tf.control_dependencies([train_op]):
             train_op = tf.group(*post_ops)
 
@@ -102,7 +110,7 @@ class MixMatch(models.MultiModel):
                               if v not in skip_ops])
 
         return EasyDict(
-            x=x_in, y=y_in, label=l_in, train_op=train_op, tune_op=train_bn,
+            x=x_in, y=y_in, e=e_in, label=l_in, train_op=train_op, tune_op=train_bn,
             classify_raw=tf.nn.softmax(classifier(x_in, training=False)),  # No EMA, for debugging.
             classify_op=tf.nn.softmax(classifier(x_in, getter=ema_getter, training=False)))
 
@@ -124,6 +132,7 @@ def main(argv):
 
         beta=FLAGS.beta,
         w_match=FLAGS.w_match,
+        nst_alpha=FLAGS.nst_alpha,
 
         scales=FLAGS.scales or (log_width - 2),
         filters=FLAGS.filters,
@@ -135,8 +144,9 @@ if __name__ == '__main__':
     utils.setup_tf()
     flags.DEFINE_float('wd', 0.02, 'Weight decay.')
     flags.DEFINE_float('ema', 0.999, 'Exponential moving average of params.')
-    flags.DEFINE_float('beta', 0.5, 'Mixup beta distribution.')
-    flags.DEFINE_float('w_match', 100, 'Weight for distribution matching loss.')
+    flags.DEFINE_float('beta', 0.75, 'Mixup beta distribution.')
+    flags.DEFINE_float('w_match', 75, 'Weight for distribution matching loss.')
+    flags.DEFINE_float('nst_alpha', 1, 'Weight for nst loss.')
     flags.DEFINE_integer('scales', 0, 'Number of 2x2 downscalings in the classifier.')
     flags.DEFINE_integer('filters', 32, 'Filter size of convolutions.')
     flags.DEFINE_integer('repeat', 4, 'Number of residual layers per stage.')

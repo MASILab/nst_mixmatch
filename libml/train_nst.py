@@ -132,9 +132,11 @@ class ClassifySemi(Model):
 
     def train_step(self, train_session, data_labeled, data_unlabeled):
         x, y = self.session.run([data_labeled, data_unlabeled])
+        e = self.dataset.match(y)
         self.tmp.step = train_session.run([self.ops.train_op, self.ops.update_step],
                                           feed_dict={self.ops.x: x['image'],
                                                      self.ops.y: y['image'],
+                                                     self.ops.e: e['image'],
                                                      self.ops.label: x['label']})[1]
 
     def train(self, train_nimg, report_nimg):
